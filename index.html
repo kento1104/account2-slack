@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Local Slack People Fetch</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #c9d1dc;
+        --shell: #dbe1ea;
+        --panel: #ffffff;
+        --border: #d5dce5;
+        --border-strong: #b8c2cf;
+        --text: #1e293b;
+        --muted: #64748b;
+        --accent: #3b82f6;
+        --accent-hover: #2563eb;
+        --danger: #ef4444;
+        --danger-hover: #dc2626;
+        --pad: 0.75rem;
+        font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; background: var(--bg); color: var(--text); height: 100%; display: flex; }
+
+      /* Layout with Sidebar */
+      .sidebar {
+        width: 280px;
+        background: #1e293b;
+        color: #e2e8f0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border-strong);
+        flex-shrink: 0;
+      }
+.status-skip { color: #7c3aed; font-weight: 600; }
+.status-paused { color: #7c3aed; font-weight: 600; }
+      .sidebar-header {
+        padding: 10px;
+        background: #0f172a;
+        font-weight: bold;
+        font-size: 12px;
+        text-transform: uppercase;
+        border-bottom: 1px solid #334155;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .sidebar-logs {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      .log-entry { margin-bottom: 4px; word-break: break-all; }
+      .log-time { color: #94a3b8; margin-right: 6px; }
+      .log-info { color: #38bdf8; }
+      .log-warn { color: #fbbf24; }
+      .log-error { color: #f87171; }
+
+      /* Main content fills all remaining width (no max-width, no side margin) */
+      .main-content {
+        flex: 1;
+        min-width: 0;
+        overflow-y: auto;
+        padding: 1.5rem;
+      }
+
+      .shell {
+        width: 100%;
+        margin: 0;
+        background: var(--shell);
+        border: 1px solid var(--border-strong);
+        border-radius: 10px;
+        padding: var(--pad) 1.25rem 1.5rem;
+        box-shadow: 0 2px 4px rgba(15, 23, 42, .08), 0 8px 20px rgba(15, 23, 42, .08);
+      }
+
+      h1 { font-size: 1.15rem; margin: 0; font-weight: 600; padding: .5rem 0 .75rem; }
+      .header { border-bottom: 2px solid var(--border-strong); margin-bottom: 1.25rem; }
+      h2 { font-size: .95rem; margin: 1.5rem 0 .5rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 10px; }
+
+      .container {
+        background: var(--panel);
+        border: 1px solid var(--border-strong);
+        border-radius: 8px;
+        padding: var(--pad);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+        margin-bottom: 1rem;
+      }
+
+      form { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin: 0 0 .6rem; }
+      form:last-child { margin-bottom: 0; }
+      form label { display: flex; align-items: center; gap: .3rem; font-size: 12px; font-weight: 500; color: var(--muted); flex: 1 1 140px; min-width: 0; }
+
+      input, select, textarea, button {
+        font: inherit; color: var(--text); border: 1px solid var(--border-strong); border-radius: 5px;
+        background: var(--panel); padding: .32rem .5rem; height: 28px; min-width: 0;
+      }
+      input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(59,130,246,.15); }
+      form input, form select { flex: 1; width: 100%; }
+
+      textarea { height: auto; min-height: 60px; resize: vertical; width: 100%; font-size: 12px; }
+      button {
+        cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent);
+        font-weight: 500; font-size: 12px; padding: 0 .75rem; white-space: nowrap; transition: background .12s ease;
+      }
+      button:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+      button:disabled { opacity: .5; cursor: not-allowed; }
+
+      .btn-refresh {
+        background: transparent; color: var(--accent); border: 1px solid var(--accent);
+        font-size: 11px; height: 22px; padding: 0 8px;
+      }
+      .btn-refresh:hover { background: var(--accent); color: #fff; }
+
+      .btn-delete { background: var(--danger); border-color: var(--danger); }
+      .btn-delete:hover { background: var(--danger-hover); border-color: var(--danger-hover); }
+      .btn-icon { width: 28px; height: 28px; padding: 0; font-size: 16px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+      .btn-small { height: 24px; font-size: 11px; padding: 0 .5rem; }
+
+      .table-wrap {
+        overflow-x: auto;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        max-width: 100%;
+      }
+      table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: 12px; }
+      th, td { padding: .45rem .6rem; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--border); }
+      th {
+        background: #eef2f7; font-weight: 700; color: #334155; font-size: 11px; text-transform: uppercase;
+        letter-spacing: .04em; white-space: nowrap; border-bottom: 2px solid var(--border-strong);
+        overflow: hidden; text-overflow: ellipsis;
+      }
+      tr:last-child td { border-bottom: none; }
+      tbody tr { transition: background .1s ease; }
+      tbody tr:hover td { background: #f1f5f9; }
+
+      .search-row th { background: #f8fafc; padding: .4rem .3rem; border-bottom: 1px solid var(--border-strong); vertical-align: top; }
+      .search-row input, .search-row select { width: 100%; height: 24px; font-size: 11px; padding: 0 .2rem; border-color: var(--border); }
+      .search-row .sent-at-group { display: flex; flex-direction: column; gap: 2px; }
+      .search-row .sent-at-group input { height: 22px; }
+
+      td.actions { text-align: left; white-space: nowrap; }
+      td.actions > * { margin-right: .35rem; }
+      td.actions > *:last-child { margin-right: 0; }
+
+      .display-name-link { color: var(--accent); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+      .display-name-link:hover { color: var(--accent-hover); text-decoration: underline solid; }
+
+      td.ai-prompt-cell, td.message-cell, td.ai-response-cell {
+        max-width: 150px;
+        width: 150px;
+        vertical-align: top;
+      }
+      .ai-prompt-text, .message-text, .ai-response-text {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px;
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 120px;
+      }
+      .ai-prompt-empty { color: var(--muted); }
+
+      .user-popup {
+        position: fixed; z-index: 1000; width: 420px; max-height: 70vh; overflow: auto;
+        background: var(--panel); border: 1px solid var(--border-strong); border-radius: 8px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, .25); font-size: 12px;
+      }
+      .user-popup-header {
+        position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between;
+        gap: .5rem; padding: .5rem .6rem; background: #eef2f7; border-bottom: 1px solid var(--border-strong);
+        font-weight: 700; font-size: 12px;
+      }
+      .user-popup-header .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .user-popup-close {
+        background: transparent; color: var(--muted); border: 1px solid transparent; font-size: 16px;
+        line-height: 1; height: 24px; width: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+      }
+      .user-popup-close:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+      .user-popup-body { padding: .5rem .6rem; }
+
+      .kv-group { margin: 0 0 .5rem; }
+      .kv-group-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: .3rem 0 .2rem; }
+      .kv-row { display: grid; grid-template-columns: 150px 1fr; gap: .4rem; padding: .15rem 0; border-bottom: 1px dashed var(--border); }
+      .kv-row:last-child { border-bottom: none; }
+      .kv-key { color: var(--muted); font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; }
+      .kv-val { word-break: break-word; white-space: pre-wrap; font-size: 11px; }
+      .kv-val.is-empty { color: #94a3b8; font-style: italic; }
+
+      .message-section, .filter-section {
+        margin-bottom: .6rem; padding: var(--pad); border: 1px solid var(--border); border-radius: 6px; background: #f8fafc;
+      }
+      .message-section h3, .filter-section h3 {
+        font-size: 11px; margin: 0 0 .4rem; font-weight: 700; color: var(--muted);
+        text-transform: uppercase; letter-spacing: .04em;
+      }
+      .message-section .hint, .filter-section .hint { font-size: 11px; color: var(--muted); margin: 0 0 .5rem; }
+      .filter-section textarea { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+      .ai-prompts { margin-top: .75rem; padding-top: .75rem; border-top: 1px dashed var(--border-strong); }
+      .ai-prompts-header { margin-bottom: .4rem; }
+      .ai-prompts-header h4, .ai-composer h4 {
+        font-size: 11px; margin: 0 0 .4rem; font-weight: 700; color: var(--muted);
+        text-transform: uppercase; letter-spacing: .04em;
+      }
+      .ai-prompt-row { display: flex; gap: .4rem; align-items: flex-start; margin-bottom: .4rem; }
+      .ai-prompt-row label { flex: 0 0 90px; font-size: 12px; font-weight: 600; color: var(--muted); padding-top: .35rem; }
+      .ai-prompt-row textarea { flex: 1; min-height: 48px; }
+      .ai-prompt-row .btn-remove { flex: 0 0 auto; }
+      .ai-composer { margin-top: .75rem; padding-top: .75rem; border-top: 1px dashed var(--border-strong); }
+      .ai-composer textarea { min-height: 80px; }
+
+      .status { min-height: 1.2rem; font-size: 12px; font-weight: 500; color: var(--accent); margin: 0 0 .6rem; }
+
+      #workspaces-body td, #accounts-body td, #fetch-body td, #send-body td, #users-body td { height: 34px; }
+
+      .users-toolbar {
+        display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
+        justify-content: space-between; margin-bottom: .6rem;
+      }
+      .users-meta { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+      /* Pagination */
+      .pagination {
+        display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .35rem;
+        margin-top: .75rem; font-size: 12px; color: var(--muted);
+      }
+      .pagination button {
+        min-width: 34px; height: 28px; padding: 0 .55rem;
+        background: var(--panel); color: var(--text); border: 1px solid var(--border-strong);
+        font-weight: 600; font-size: 12px;
+      }
+      .pagination button:hover:not(:disabled) { background: #eef2f7; }
+      .pagination button:disabled { opacity: .4; cursor: not-allowed; }
+      .pagination button.page-btn.is-active {
+        background: var(--accent); color: #fff; border-color: var(--accent); cursor: default;
+      }
+      .pagination button.page-btn.is-active:hover { background: var(--accent); }
+      .pagination .ellipsis {
+        min-width: 34px; height: 28px; padding: 0 .55rem;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: var(--muted); font-weight: 600;
+      }
+      .pagination .page-jump { display: inline-flex; align-items: center; gap: .3rem; margin-left: .5rem; color: var(--muted); }
+      .pagination .page-jump input {
+        width: 60px; height: 28px; text-align: center; font-size: 12px;
+        border: 1px solid var(--border-strong); border-radius: 5px;
+      }
+      .pagination .page-jump button { min-width: 34px; }
+      .pagination .page-info { margin-right: .5rem; }
+
+      .status-yes { color: #15803d; font-weight: 600; }
+      .status-no  { color: #b91c1c; font-weight: 600; }
+      .status-running { color: #d97706; font-weight: 600; }
+      .status-completed { color: #15803d; font-weight: 600; }
+      .status-failed { color: #b91c1c; font-weight: 600; }
+      .status-cancelled { color: var(--muted); font-weight: 600; }
+      .status-dead { background-color: #fee2e2; color: #b91c1c; font-weight: bold; }
+
+      /* API Key textarea in table */
+      td.api-key-cell textarea {
+        width: 100%; min-height: 60px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px; border: 1px dashed var(--border-strong); background: transparent; padding: .2rem;
+        resize: vertical;
+      }
+      td.api-key-cell textarea:focus { background: #fff; border-style: solid; }
+
+      /* Send setup row + delay panel */
+      .send-setup-row {
+        display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .6rem;
+        background: #f8fafc; padding: .5rem; border: 1px solid var(--border); border-radius: 6px;
+      }
+      .send-setup-row label { display: flex; align-items: center; gap: .3rem; font-size: 12px; font-weight: 500; color: var(--muted); }
+      .send-setup-row input, .send-setup-row select { width: auto; height: 26px; }
+      .delay-panel {
+        margin-left: auto; display: flex; align-items: center; gap: .3rem;
+        font-size: 11px; font-weight: 700; color: var(--muted); background: #eef2f7; padding: .2rem .5rem; border-radius: 4px;
+      }
+      .delay-panel input { width: 60px; height: 24px; font-size: 12px; }
+
+      td input.recipient-input { width: 70px; height: 24px; font-size: 12px; }
+
+      /* Pin narrow columns so the three text columns don't get squeezed */
+      /* Pin narrow columns so the three text columns don't get squeezed */
+#users-body td:nth-child(1),  #users-body th:nth-child(1)  { width: 42px; }
+#users-body td:nth-child(2),  #users-body th:nth-child(2)  { max-width: 130px; }
+#users-body td:nth-child(3),  #users-body th:nth-child(3)  { max-width: 90px; }
+#users-body td:nth-child(4),  #users-body th:nth-child(4)  { max-width: 140px; }
+#users-body td:nth-child(5),  #users-body th:nth-child(5)  { width: 70px; }
+#users-body td:nth-child(6),  #users-body th:nth-child(6)  { width: 58px; }
+#users-body td:nth-child(7),  #users-body th:nth-child(7)  { width: 90px; }
+#users-body td:nth-child(8),  #users-body th:nth-child(8)  { max-width: 90px; }
+#users-body td:nth-child(9),  #users-body th:nth-child(9),
+#users-body td:nth-child(10), #users-body th:nth-child(10) { width: 60px; }
+#users-body td:nth-child(11), #users-body th:nth-child(11),
+#users-body td:nth-child(12), #users-body th:nth-child(12),
+#users-body td:nth-child(13), #users-body th:nth-child(13),
+#users-body td:nth-child(14), #users-body th:nth-child(14) { width: 70px; }
+#users-body td:nth-child(18), #users-body th:nth-child(18),
+#users-body td:nth-child(19), #users-body th:nth-child(19) { width: 70px; }
+
+#users-body td:nth-child(2),
+#users-body td:nth-child(3),
+#users-body td:nth-child(4),
+#users-body td:nth-child(8) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+      @media (max-width: 640px) {
+        .main-content { padding: .75rem; }
+        .shell { padding: var(--pad) .75rem 1rem; border-radius: 8px; }
+        .user-popup { width: calc(100vw - 1rem); }
+        .kv-row { grid-template-columns: 110px 1fr; }
+        .pagination .page-jump { margin-left: 0; }
+      }
+    </style>
+    <script src="/client.js" defer></script>
+  </head>
+  <body>
+    <!-- Log Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        Server Logs
+        <button id="clear-logs" class="btn-refresh" style="border-color: #475569; color: #94a3b8;">Clear</button>
+      </div>
+      <div class="sidebar-logs" id="log-container">
+        <!-- Logs will appear here -->
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <div class="shell">
+        <div class="header">
+          <h1>Local Slack People Fetch</h1>
+        </div>
+
+        <h2>Workspaces</h2>
+        <div class="container">
+          <form id="workspace-form">
+            <label>Upstream
+              <input id="ws-upstream" name="upstream" type="url" value="https://fluttercommunity.slack.com" required>
+            </label>
+            <label>Slack route
+              <input id="ws-slack-route" name="slack_route" value="TGT6YF2J1" autocomplete="off" required>
+            </label>
+            <label>Workspace Name
+              <input id="ws-workspace-name" name="workspace_name" type="text" placeholder="e.g. Flutter Community" required>
+            </label>
+            <button id="save-workspace" type="submit">Register</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Workspace Name</th>
+                  <th>Slack Route</th>
+                  <th>Upstream</th>
+                  <th>Accounts</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="workspaces-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <h2>Accounts</h2>
+        <div class="container">
+          <form id="account-form">
+            <label>Workspace
+              <select id="acc-workspace" name="workspace_id" required>
+                <option value="">— select —</option>
+              </select>
+            </label>
+            <label>Account Name
+              <input id="acc-account-name" name="account_name" type="text" placeholder="e.g. My Slack Account" required>
+            </label>
+            <label>AI Type
+              <select id="acc-ai-type" name="ai_type" required>
+                <option value="mistral">Mistral</option>
+                <option value="openai">OpenAI</option>
+                <option value="gemini">Gemini</option>
+              </select>
+            </label>
+            <label style="flex: 1 1 100%; margin-top: .2rem;">API Keys (one per line)
+              <textarea id="acc-api-key" name="api_key" required style="min-height: 60px;"></textarea>
+            </label>
+            <label>Cookie
+              <input id="acc-cookie" name="cookie" type="password" autocomplete="off" required
+                placeholder="Cookie header value">
+            </label>
+            <label>Token
+              <input id="acc-token" name="token" type="password" autocomplete="off" required>
+            </label>
+            <button id="save-account" type="submit">Save</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Workspace</th>
+                  <th>Account Name</th>
+                  <th>AI Type</th>
+                  <th style="width: 300px;">API Keys</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="accounts-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <h2>Fetch</h2>
+        <div class="container">
+          <p id="fetch-status" class="status" role="status" aria-live="polite"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Workspace Name</th>
+                  <th>Get status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="fetch-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <h2>Send</h2>
+        <div class="container">
+          <div class="filter-section">
+            <h3>Filter Script</h3>
+            <p class="hint">
+              The script receives a <code>user</code> object (the raw Slack user JSON) and must return
+              <code>true</code> to send a message to that user, or <code>false</code> to skip them.
+              The variables <code>score</code> and <code>threshold</code> may be defined in the script;
+              their values are recorded for each sent user and displayed in the Users table below.
+              If left empty, every user passes the filter.
+            </p>
+            <textarea id="filter-script" placeholder="// Example:&#10;const threshold = -1;&#10;let score = 0;&#10;if (user['profile'] && user['profile']['title'] === null) score += 0;&#10;return score > threshold;"></textarea>
+          </div>
+
+          <div class="message-section">
+            <h3>Message Template</h3>
+            <p class="hint">
+              Use <code>{path.to.field}</code> to substitute values from the current user's JSON
+              (e.g. <code>{profile.display_name}</code>).<br>
+              Use <code>{AI_answer}</code> to insert the text generated from the AI prompt below.
+              If <code>{AI_answer}</code> is present, the AI is called per user and its result is
+              substituted; otherwise the template is sent as a static message with user-field
+              substitution only.
+            </p>
+            <textarea id="broadcast-message" placeholder="e.g. Hello {profile.display_name}, {AI_answer}"></textarea>
+
+            <div class="ai-composer">
+              <h4>Main AI Prompt (composer)</h4>
+              <p class="hint">
+                This is the exact text sent to the AI. Reference values from the variables below using
+                <code>{AI_prompt1}</code>, <code>{AI_prompt2}</code>, … and user fields with
+                <code>{profile.display_name}</code>. All placeholders are resolved before calling the AI.
+              </p>
+              <textarea id="ai-prompt-input" placeholder="e.g. Write a short greeting for {profile.display_name}.&#10;&#10;Tone: {AI_prompt1}&#10;Extra instruction: {AI_prompt2}"></textarea>
+            </div>
+
+            <div class="ai-prompts">
+              <div class="ai-prompts-header">
+                <h4>AI Prompt Variables (mapped values)</h4>
+              </div>
+              <div id="ai-prompts-list"></div>
+              <button id="add-ai-prompt" type="button" class="btn-icon" title="Add a new AI prompt variable">+</button>
+            </div>
+          </div>
+
+          <div class="send-setup-row">
+            <label>Workspace
+              <select id="send-workspace">
+                <option value="">— select —</option>
+              </select>
+            </label>
+            <label>Account
+              <select id="send-account">
+                <option value="">— select —</option>
+              </select>
+            </label>
+            <label>Recipients
+              <input id="send-count" type="number" min="1" value="10" style="width: 70px;">
+            </label>
+            <button id="btn-add-send" type="button">Save</button>
+
+            <div class="delay-panel">
+              <label for="delay-input">AI Delay (ms)</label>
+              <input id="delay-input" type="number" min="0" value="1000">
+            </div>
+          </div>
+
+          <p id="send-status" class="status" role="status" aria-live="polite"></p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Workspace</th>
+                  <th>Total</th>
+                  <th>Account</th>
+                  <th>Recipients</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="send-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <h2>Users <button id="refresh-users" class="btn-refresh" title="Reload data from database">Refresh</button></h2>
+        <div class="container">
+          <div class="users-toolbar">
+            <span id="users-meta" class="users-meta"></span>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+  <tr>
+    <th>No.</th>
+    <th>Workspace Name</th>
+    <th>User ID</th>
+    <th>Display Name</th>
+    <th>DM Link</th>
+    <th>Is Sent</th>
+    <th>Sent At</th>
+    <th>Account</th>
+    <th>Score</th>
+    <th>Threshold</th>
+    <th>Is Admin</th>
+    <th>Restricted</th>
+    <th>Deleted</th>
+    <th>Ultra Restricted</th>
+    <th>AI Prompt</th>
+    <th>Message</th>
+    <th>AI Response</th>
+    <th>Status</th>
+    <th>Reply</th>
+  </tr>
+  <tr class="search-row">
+    <th></th>
+    <th>
+      <select id="search-workspace"><option value="">All</option></select>
+    </th>
+    <th><input id="search-userid" type="text" placeholder="contains..."></th>
+    <th><input id="search-display" type="text" placeholder="contains..."></th>
+    <th></th>
+    <th>
+      <select id="search-sent">
+        <option value="">All</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+        <option value="skip">Skip</option>
+      </select>
+    </th>
+    <th>
+      <div class="sent-at-group">
+        <input id="search-sent-at-from" type="date" title="From date">
+        <input id="search-sent-at-to" type="date" title="To date">
+      </div>
+    </th>
+    <th>
+      <select id="search-account"><option value="">All</option></select>
+    </th>
+    <th></th>
+    <th></th>
+    <th>
+      <select id="search-is-admin" title="Is Admin">
+        <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
+      </select>
+    </th>
+    <th>
+      <select id="search-is-restricted" title="Is Restricted">
+        <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
+      </select>
+    </th>
+    <th>
+      <select id="search-deleted" title="Deleted">
+        <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
+      </select>
+    </th>
+    <th>
+      <select id="search-is-ultra-restricted" title="Is Ultra Restricted">
+        <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
+      </select>
+    </th>
+    <th></th>
+    <th></th>
+    <th></th>
+    <th>
+      <select id="search-status">
+        <option value="">All</option><option value="alive">Alive</option><option value="dead">Dead</option>
+      </select>
+    </th>
+    <th>
+      <select id="search-is-reply">
+        <option value="">All</option><option value="yes">Yes</option><option value="no">No</option>
+      </select>
+    </th>
+  </tr>
+</thead>
+              <tbody id="users-body"></tbody>
+            </table>
+          </div>
+
+          <div class="pagination" id="users-pagination">
+            <!-- Populated by client.js -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

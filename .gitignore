@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+/DMv2/
+/prompt/
+/filter.txt
+/info.txt
+/prompt.txt
+slack-people.sqlite*
+New Text Document.txt
+slack_user_sample.json

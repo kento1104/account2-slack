@@ -1,0 +1,13 @@
+{
+  "name": "local-slack-people-search",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A localhost-only tool to save, fetch, and message Slack users",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "node --experimental-sqlite server.js",
+    "test": "node --test"
+  }
+}
